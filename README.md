@@ -1,6 +1,6 @@
 # Knowledge Refinery
 
-A Streamlit application for transforming raw audio lessons into refined knowledge: transcribe MP3 audio files using Whisper, correct transcriptions with LLM, and generate insightful summaries.
+A Streamlit application for transforming raw audio lessons into refined knowledge: transcribe MP3 audio files using Whisper, correct transcriptions with LLM, and generate insightful summaries with LLM.
 
 ## Features
 
