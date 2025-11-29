@@ -88,6 +88,58 @@ class LessonService:
         """Delete a lesson"""
         return crud.delete_lesson(self.session, lesson_id)
     
+    def duplicate_lesson(self, lesson_id: int, new_title_suffix: str = " (Copy)") -> Optional[Lesson]:
+        """
+        Duplicate a lesson with all its data and audio file.
+        Creates a copy with a new ID and copies the audio file.
+        
+        Args:
+            lesson_id: ID of the lesson to duplicate
+            new_title_suffix: Suffix to add to the new lesson title
+            
+        Returns:
+            The newly created lesson or None if original lesson not found
+        """
+        from pathlib import Path
+        import shutil
+        from utils.file_manager import get_audio_file_path
+        
+        # Get the original lesson
+        original_lesson = self.get_lesson(lesson_id)
+        if not original_lesson:
+            return None
+        
+        # Create new lesson with copied data
+        new_lesson = self.create_lesson(
+            title=original_lesson.title + new_title_suffix,
+            filename=original_lesson.filename,
+            course_id=original_lesson.course_id,
+            date=original_lesson.date,
+            duration=original_lesson.duration,
+            transcript=original_lesson.transcript,
+            corrected_transcript=original_lesson.corrected_transcript,
+            summary=original_lesson.summary,
+            theme_ids=original_lesson.get_themes()
+        )
+        
+        # Copy metadata if present
+        if original_lesson.transcript_metadata or original_lesson.correction_metadata or original_lesson.summary_metadata:
+            self.update_lesson(
+                new_lesson.id,
+                transcript_metadata=original_lesson.transcript_metadata,
+                correction_metadata=original_lesson.correction_metadata,
+                summary_metadata=original_lesson.summary_metadata
+            )
+        
+        # Copy the audio file with new ID
+        original_audio_path = get_audio_file_path(original_lesson.id, original_lesson.filename)
+        if original_audio_path.exists():
+            new_audio_path = get_audio_file_path(new_lesson.id, new_lesson.filename)
+            shutil.copy2(original_audio_path, new_audio_path)
+        
+        # Refresh to get updated lesson
+        return self.get_lesson(new_lesson.id)
+    
     def save_transcript(
         self, 
         lesson_id: int, 

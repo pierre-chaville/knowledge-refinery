@@ -4,6 +4,9 @@ from utils.file_manager import ensure_data_folders
 from db.database import get_session
 from services.lesson_service import LessonService
 from services.course_service import CourseService
+import streamlit.components.v1 as components
+import base64
+from pathlib import Path
 
 # Configure page (must be first Streamlit command)
 st.set_page_config(
@@ -51,6 +54,47 @@ def format_duration(seconds: Optional[float]) -> str:
         mins = minutes % 60
         return f"{hours}h {mins}m {secs}s"
     return f"{minutes}m {secs}s"
+
+def create_audio_player(audio_path: Path, player_id: str = "audioPlayer") -> str:
+    """
+    Create a custom HTML5 audio player with seek functionality.
+    Returns HTML code with embedded audio as base64.
+    """
+    # Read audio file and encode as base64
+    with open(audio_path, "rb") as audio_file:
+        audio_bytes = audio_file.read()
+        audio_base64 = base64.b64encode(audio_bytes).decode()
+    
+    # Determine MIME type based on file extension
+    ext = audio_path.suffix.lower()
+    mime_type = "audio/mpeg" if ext == ".mp3" else f"audio/{ext[1:]}"
+    
+    html_code = f"""
+    <div style="margin: 20px 0;">
+        <audio id="{player_id}" controls style="width: 100%;">
+            <source src="data:{mime_type};base64,{audio_base64}" type="{mime_type}">
+            Your browser does not support the audio element.
+        </audio>
+    </div>
+    <script>
+        // Function to seek to a specific time
+        function seekTo(seconds) {{
+            var audio = document.getElementById('{player_id}');
+            if (audio) {{
+                audio.currentTime = seconds;
+                audio.play();
+            }}
+        }}
+        
+        // Listen for messages from Streamlit
+        window.addEventListener('message', function(event) {{
+            if (event.data && event.data.type === 'seek') {{
+                seekTo(event.data.time);
+            }}
+        }});
+    </script>
+    """
+    return html_code
 
 st.title("🔬 Knowledge Refinery")
 st.caption("Transform audio lessons into refined knowledge")
@@ -107,8 +151,6 @@ with st.sidebar:
         )
         selected_lesson_id = lesson_options[selected_lesson_name]
 
-st.markdown("---")
-
 if not processed_lessons:
     st.info("📝 No processed lessons found. Go to **Process** to transcribe and analyze your lessons.")
 else:
@@ -116,26 +158,90 @@ else:
     lesson = lesson_service.get_lesson(selected_lesson_id)
     
     if lesson:
-        # Display lesson details
-        st.markdown("---")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Date", lesson.date.strftime("%Y-%m-%d"))
-        with col2:
-            st.metric("Duration", format_duration(lesson.duration))
-        with col3:
-            course = course_service.get_course(lesson.course_id) if lesson.course_id else None
-            st.metric("Course", course.name if course else "N/A")
-        with col4:
-            st.metric("File", lesson.filename)
+        # Display lesson title and date below main heading
+        st.markdown(f"### 📖 {lesson.title}")
+        st.caption(f"📅 {lesson.date.strftime('%A, %B %d, %Y')}")
         
         st.markdown("---")
         
-        # Tabs for Summary, Corrected Transcript, Initial Transcript
-        tab1, tab2, tab3 = st.tabs(["📄 Summary", "✅ Corrected Transcript", "📝 Initial Transcript"])
+        # Tabs for Lesson Details, Summary, Corrected Transcript, Initial Transcript
+        tab2, tab3, tab4, tab1 = st.tabs(["📄 Summary", "✅ Corrected Transcript", "📝 Initial Transcript", "📋 Lesson"])
+        
+        # ========== LESSON TAB ==========
+        with tab1:
+            st.subheader("Lesson Details")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**ID:** {lesson.id}")
+                st.write(f"**Title:** {lesson.title}")
+                st.write(f"**Date:** {lesson.date.strftime('%Y-%m-%d')}")
+                st.write(f"**Duration:** {format_duration(lesson.duration)}")
+            
+            with col2:
+                course = course_service.get_course(lesson.course_id) if lesson.course_id else None
+                st.write(f"**Course:** {course.name if course else 'N/A'}")
+                st.write(f"**Filename:** {lesson.filename}")
+                
+                # Show themes
+                from services.theme_service import ThemeService
+                theme_service = ThemeService(session)
+                theme_ids = lesson.get_themes()
+                if theme_ids:
+                    theme_objs = theme_service.get_themes_by_ids(theme_ids)
+                    theme_names = [t.name for t in theme_objs]
+                    st.write(f"**Themes:** {', '.join(theme_names)}")
+                else:
+                    st.write(f"**Themes:** None")
+            
+            # Show status
+            st.markdown("---")
+            st.subheader("Processing Status")
+            col_status1, col_status2, col_status3 = st.columns(3)
+            
+            with col_status1:
+                if lesson.transcript:
+                    st.success("✅ Transcript Available")
+                    metadata = lesson.get_transcript_metadata()
+                    if metadata:
+                        st.caption(f"Model: {metadata.model_size or 'N/A'}")
+                        st.caption(f"Device: {metadata.device or 'N/A'}")
+                else:
+                    st.warning("⏳ No Transcript")
+            
+            with col_status2:
+                if lesson.corrected_transcript:
+                    st.success("✅ Corrected Transcript")
+                    metadata = lesson.get_correction_metadata()
+                    if metadata:
+                        st.caption(f"Provider: {metadata.provider or 'N/A'}")
+                        st.caption(f"Model: {metadata.model or 'N/A'}")
+                else:
+                    st.warning("⏳ No Correction")
+            
+            with col_status3:
+                if lesson.summary:
+                    st.success("✅ Summary Available")
+                    metadata = lesson.get_summary_metadata()
+                    if metadata:
+                        st.caption(f"Provider: {metadata.provider or 'N/A'}")
+                        st.caption(f"Model: {metadata.model or 'N/A'}")
+                else:
+                    st.warning("⏳ No Summary")
+            
+            # Check audio file
+            from utils.file_manager import get_audio_file_path
+            audio_path = get_audio_file_path(lesson.id, lesson.filename)
+            st.markdown("---")
+            if audio_path.exists():
+                file_size = audio_path.stat().st_size / 1024 / 1024
+                st.info(f"🎵 Audio file: {lesson.filename} ({file_size:.2f} MB)")
+            else:
+                st.error(f"❌ Audio file not found: {lesson.filename}")
         
         # ========== SUMMARY TAB ==========
-        with tab1:
+        with tab2:
             if lesson.summary:
                 # Display metadata
                 metadata = lesson.get_summary_metadata()
@@ -153,12 +259,8 @@ else:
                             st.text(metadata.prompt)
                     st.markdown("---")
                 
-                st.text_area(
-                    "Summary",
-                    lesson.summary,
-                    height=400,
-                    key="home_summary_display"
-                )
+                st.markdown("**Summary:**")
+                st.markdown(lesson.summary)
                 
                 # Download button
                 st.download_button(
@@ -172,7 +274,7 @@ else:
                 st.info("No summary available for this lesson. Go to **Process** → **Summarize** to create one.")
         
         # ========== CORRECTED TRANSCRIPT TAB ==========
-        with tab2:
+        with tab3:
             if lesson.corrected_transcript:
                 # Display metadata
                 metadata = lesson.get_correction_metadata()
@@ -190,27 +292,113 @@ else:
                             st.text(metadata.prompt)
                     st.markdown("---")
                 
-                corrected_text = lesson_service.get_corrected_transcript_text(lesson)
-                st.text_area(
-                    "Corrected Transcript",
-                    corrected_text or "",
-                    height=400,
-                    key="home_corrected_display"
-                )
+                # Check if audio file exists (for potential audio playback)
+                from utils.file_manager import get_audio_file_path
+                audio_path = get_audio_file_path(lesson.id, lesson.filename)
                 
-                # Download button
-                st.download_button(
-                    label="📥 Download Corrected Transcript",
-                    data=corrected_text or "",
-                    file_name=f"{lesson.title}_corrected.txt",
-                    mime="text/plain",
-                    key="download_corrected_home"
-                )
+                # Try to get original transcript segments for timestamps
+                original_segments = lesson_service.get_transcript_segments(lesson)
+                
+                if original_segments and audio_path.exists():
+                    # Initialize session state for seek time
+                    if f'seek_time_corrected_{lesson.id}' not in st.session_state:
+                        st.session_state[f'seek_time_corrected_{lesson.id}'] = None
+                    
+                    # Display custom audio player
+                    st.subheader("🎵 Audio Player")
+                    player_id = f"audioPlayer_corrected_{lesson.id}"
+                    
+                    # Create the audio player HTML
+                    audio_html = create_audio_player(audio_path, player_id)
+                    
+                    # If a seek time is set, add JavaScript to seek
+                    seek_time = st.session_state[f'seek_time_corrected_{lesson.id}']
+                    if seek_time is not None:
+                        audio_html += f"""
+                        <script>
+                            setTimeout(function() {{
+                                seekTo({seek_time});
+                            }}, 100);
+                        </script>
+                        """
+                        # Reset seek time after using it
+                        st.session_state[f'seek_time_corrected_{lesson.id}'] = None
+                    
+                    components.html(audio_html, height=80)
+                    
+                    st.markdown("---")
+                    st.subheader("📝 Interactive Corrected Transcript")
+                    st.caption("🔊 Click on timestamps to jump to that position in the audio player above (timestamps from original transcript)")
+                    
+                    # Get corrected text and try to align with original segments
+                    corrected_text = lesson_service.get_corrected_transcript_text(lesson)
+                    corrected_lines = corrected_text.split('\n') if corrected_text else []
+                    
+                    # Display with timestamps from original segments
+                    for i, seg in enumerate(original_segments):
+                        start_time = seg['start']
+                        end_time = seg['end']
+                        
+                        # Use corrected text if available, otherwise use original
+                        if i < len(corrected_lines):
+                            text = corrected_lines[i]
+                        else:
+                            text = seg['text']
+                        
+                        # Format timestamps
+                        start_str = format_timestamp(start_time)
+                        end_str = format_timestamp(end_time)
+                        
+                        # Create columns for timestamp button and text
+                        col1, col2 = st.columns([1, 5])
+                        
+                        with col1:
+                            # Clickable timestamp button
+                            if st.button(
+                                f"🔊 {start_str}",
+                                key=f"timestamp_corrected_home_{lesson.id}_{i}",
+                                help=f"Click to jump to {start_str}"
+                            ):
+                                # Set the seek time and rerun
+                                st.session_state[f'seek_time_corrected_{lesson.id}'] = start_time
+                                st.rerun()
+                        
+                        with col2:
+                            st.markdown(f"**[{start_str} - {end_str}]** {text}")
+                    
+                    st.markdown("---")
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Corrected Transcript",
+                        data=corrected_text or "",
+                        file_name=f"{lesson.title}_corrected.txt",
+                        mime="text/plain",
+                        key="download_corrected_home"
+                    )
+                else:
+                    # No segments or audio, display as plain text
+                    corrected_text = lesson_service.get_corrected_transcript_text(lesson)
+                    st.text_area(
+                        "Corrected Transcript",
+                        corrected_text or "",
+                        height=400,
+                        key=f"home_corrected_display_{lesson.id}"
+                    )
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Corrected Transcript",
+                        data=corrected_text or "",
+                        file_name=f"{lesson.title}_corrected.txt",
+                        mime="text/plain",
+                        key="download_corrected_home"
+                    )
             else:
                 st.info("No corrected transcript available. Go to **Process** → **Correct** to create one.")
         
         # ========== INITIAL TRANSCRIPT TAB ==========
-        with tab3:
+        with tab4:
             if lesson.transcript:
                 # Display metadata
                 metadata = lesson.get_transcript_metadata()
@@ -232,30 +420,122 @@ else:
                                 st.text(metadata.initial_prompt)
                     st.markdown("---")
                 
+                # Check if audio file exists
+                from utils.file_manager import get_audio_file_path
+                audio_path = get_audio_file_path(lesson.id, lesson.filename)
+                
                 # Check if it's segments or plain text
                 transcript_segments = lesson_service.get_transcript_segments(lesson)
-                if transcript_segments:
-                    # Format with timestamps
+                
+                if transcript_segments and audio_path.exists():
+                    # Initialize session state for seek time
+                    if f'seek_time_transcript_{lesson.id}' not in st.session_state:
+                        st.session_state[f'seek_time_transcript_{lesson.id}'] = None
+                    
+                    # Display custom audio player
+                    st.subheader("🎵 Audio Player")
+                    player_id = f"audioPlayer_transcript_{lesson.id}"
+                    
+                    # Create the audio player HTML
+                    audio_html = create_audio_player(audio_path, player_id)
+                    
+                    # If a seek time is set, add JavaScript to seek
+                    seek_time = st.session_state[f'seek_time_transcript_{lesson.id}']
+                    if seek_time is not None:
+                        audio_html += f"""
+                        <script>
+                            setTimeout(function() {{
+                                seekTo({seek_time});
+                            }}, 100);
+                        </script>
+                        """
+                        # Reset seek time after using it
+                        st.session_state[f'seek_time_transcript_{lesson.id}'] = None
+                    
+                    components.html(audio_html, height=80)
+                    
+                    st.markdown("---")
+                    st.subheader("📝 Interactive Transcript")
+                    st.caption("🔊 Click on timestamps to jump to that position in the audio player above")
+                    
+                    # Display transcript with clickable timestamps
+                    for i, seg in enumerate(transcript_segments):
+                        start_time = seg['start']
+                        end_time = seg['end']
+                        text = seg['text']
+                        
+                        # Format timestamps
+                        start_str = format_timestamp(start_time)
+                        end_str = format_timestamp(end_time)
+                        
+                        # Create columns for timestamp button and text
+                        col1, col2 = st.columns([1, 5])
+                        
+                        with col1:
+                            # Clickable timestamp button
+                            if st.button(
+                                f"🔊 {start_str}",
+                                key=f"timestamp_home_{lesson.id}_{i}",
+                                help=f"Click to jump to {start_str}"
+                            ):
+                                # Set the seek time and rerun
+                                st.session_state[f'seek_time_transcript_{lesson.id}'] = start_time
+                                st.rerun()
+                        
+                        with col2:
+                            st.markdown(f"**[{start_str} - {end_str}]** {text}")
+                    
+                    st.markdown("---")
+                    
+                    # Also provide full text version for download
                     transcript_text = format_transcript_with_timestamps(transcript_segments)
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Transcript",
+                        data=transcript_text or "",
+                        file_name=f"{lesson.title}_transcript.txt",
+                        mime="text/plain",
+                        key="download_transcript_home"
+                    )
+                    
+                elif transcript_segments:
+                    # Has segments but no audio file
+                    st.warning("⚠️ Audio file not found. Displaying transcript without audio player.")
+                    transcript_text = format_transcript_with_timestamps(transcript_segments)
+                    st.text_area(
+                        "Initial Transcript",
+                        transcript_text or "",
+                        height=400,
+                        key=f"home_transcript_display_{lesson.id}"
+                    )
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Transcript",
+                        data=transcript_text or "",
+                        file_name=f"{lesson.title}_transcript.txt",
+                        mime="text/plain",
+                        key="download_transcript_home"
+                    )
                 else:
-                    # Plain text
+                    # Plain text transcript
                     transcript_text = lesson_service.get_transcript_text(lesson)
-                
-                st.text_area(
-                    "Initial Transcript",
-                    transcript_text or "",
-                    height=400,
-                    key="home_transcript_display"
-                )
-                
-                # Download button
-                st.download_button(
-                    label="📥 Download Transcript",
-                    data=transcript_text or "",
-                    file_name=f"{lesson.title}_transcript.txt",
-                    mime="text/plain",
-                    key="download_transcript_home"
-                )
+                    st.text_area(
+                        "Initial Transcript",
+                        transcript_text or "",
+                        height=400,
+                        key=f"home_transcript_display_{lesson.id}"
+                    )
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Transcript",
+                        data=transcript_text or "",
+                        file_name=f"{lesson.title}_transcript.txt",
+                        mime="text/plain",
+                        key="download_transcript_home"
+                    )
             else:
                 st.info("No transcript available. Go to **Process** → **Transcribe** to create one.")
 

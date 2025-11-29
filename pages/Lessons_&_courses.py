@@ -24,7 +24,6 @@ def format_duration(seconds: float | None) -> str:
 
 def app():
     st.title("📚 Lessons Management")
-    st.markdown("---")
 
     # Increase tab label size for better readability
     st.markdown(

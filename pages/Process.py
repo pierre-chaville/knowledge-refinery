@@ -118,6 +118,27 @@ def app():
         if selected_lesson_str:
             lesson_id = int(selected_lesson_str.split(":")[0])
             st.session_state['selected_lesson_id'] = lesson_id
+        
+        # Duplicate lesson button
+        if st.session_state.get('selected_lesson_id'):
+            st.markdown("---")
+            st.subheader("Actions")
+            
+            if st.button("📋 Duplicate Lesson", use_container_width=True, help="Create a copy of this lesson for testing different parameters"):
+                lesson_to_duplicate = lesson_service.get_lesson(st.session_state['selected_lesson_id'])
+                if lesson_to_duplicate:
+                    with st.spinner("Duplicating lesson and audio file..."):
+                        new_lesson = lesson_service.duplicate_lesson(st.session_state['selected_lesson_id'])
+                        if new_lesson:
+                            st.success(f"✅ Lesson duplicated successfully! New lesson ID: {new_lesson.id}")
+                            st.info(f"📝 New title: {new_lesson.title}")
+                            # Auto-select the new lesson
+                            st.session_state['selected_lesson_id'] = new_lesson.id
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to duplicate lesson")
+                else:
+                    st.error("❌ Lesson not found")
     
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Lesson", "🎙️ Transcribe", "✅ Correct", "📄 Summarize"])
@@ -181,20 +202,20 @@ def app():
                         transcript_text = format_transcript_with_timestamps(segments)
                     else:
                         transcript_text = lesson_service.get_transcript_text(lesson)
-                    st.text_area("Transcript", transcript_text or "", height=200, key="lesson_transcript_display", disabled=True)
+                    st.text_area("Transcript", transcript_text or "", height=200, key=f"lesson_transcript_display_{lesson.id}", disabled=True)
                 
                 # Show corrected transcript if available
                 if lesson.corrected_transcript:
                     st.markdown("---")
                     st.subheader("Corrected Transcript")
                     corrected_text = lesson_service.get_corrected_transcript_text(lesson)
-                    st.text_area("Corrected Transcript", corrected_text or "", height=200, key="lesson_corrected_display", disabled=True)
+                    st.text_area("Corrected Transcript", corrected_text or "", height=200, key=f"lesson_corrected_display_{lesson.id}", disabled=True)
                 
                 # Show summary if available
                 if lesson.summary:
                     st.markdown("---")
                     st.subheader("Summary")
-                    st.text_area("Summary", lesson.summary or "", height=150, key="lesson_summary_display", disabled=True)
+                    st.markdown(lesson.summary or "")
     
     # ========== TRANSCRIBE TAB ==========
     with tab2:
@@ -243,7 +264,7 @@ def app():
                         "Current Transcript",
                         existing_transcript or "",
                         height=200,
-                        key="existing_transcript_tab2",
+                        key=f"existing_transcript_tab2_{lesson.id}",
                         disabled=True
                     )
                     st.warning("⚠️ This will replace the existing transcript if you proceed.")
@@ -304,7 +325,7 @@ def app():
                                 "Transcription Result",
                                 transcript_text,
                                 height=300,
-                                key="transcript_result_tab2"
+                                key=f"transcript_result_tab2_{lesson.id}"
                             )
                             
                             # Download button
@@ -379,7 +400,7 @@ def app():
                         "Original Transcript",
                         transcript_text,
                         height=300,
-                        key="original_transcript_tab3"
+                        key=f"original_transcript_tab3_{lesson.id}"
                     )
                     
                     st.markdown("---")
@@ -427,7 +448,7 @@ def app():
                             "Current Corrected Transcript",
                             existing_corrected or "",
                             height=200,
-                            key="existing_corrected_tab3",
+                            key=f"existing_corrected_tab3_{lesson.id}",
                             disabled=True
                         )
                         st.warning("⚠️ This will replace the existing corrected transcript if you proceed.")
@@ -457,7 +478,7 @@ def app():
                                     "Corrected Result",
                                     corrected_text,
                                     height=300,
-                                    key="corrected_result_tab3"
+                                    key=f"corrected_result_tab3_{lesson.id}"
                                 )
                                 
                                 # Download button
@@ -529,7 +550,7 @@ def app():
                     "Transcript Type",
                     ["Original Transcript", "Corrected Transcript"],
                     horizontal=True,
-                    key="summary_transcript_type"
+                    key=f"summary_transcript_type_{lesson.id}"
                 )
                 
                 # Get transcript based on type
@@ -546,11 +567,15 @@ def app():
                 
                 st.info(f"**Lesson:** {lesson.title} | **Type:** {transcript_type}")
                 
+                # Create a unique key based on both lesson ID and transcript type
+                transcript_key = "original" if transcript_type == "Original Transcript" else "corrected"
+                
                 st.text_area(
                     "Transcript to Summarize",
                     transcript_text,
                     height=200,
-                    key="transcript_to_summarize_tab4"
+                    key=f"transcript_to_summarize_tab4_{lesson.id}_{transcript_key}",
+                    disabled=True
                 )
                 
                 st.markdown("---")
@@ -591,18 +616,13 @@ def app():
                             st.caption(f"**Model:** {metadata.model or 'N/A'}")
                         with col_meta3:
                             st.caption(f"**Temperature:** {metadata.temperature or 'N/A'}")
-                        if metadata.prompt:
-                            with st.expander("View Prompt Used"):
-                                st.text(metadata.prompt)
-                    
-                    st.text_area(
-                        "Current Summary",
-                        lesson.summary or "",
-                        height=150,
-                        key="existing_summary_tab4",
-                        disabled=True
-                    )
-                    st.warning("⚠️ This will replace the existing summary if you proceed.")
+                    if metadata.prompt:
+                        with st.expander("View Prompt Used"):
+                            st.text(metadata.prompt)
+                
+                st.subheader("Current Summary")
+                st.markdown(lesson.summary or "")
+                st.warning("⚠️ This will replace the existing summary if you proceed.")
                 
                 # Check for running or completed summary task
                 summary_task_id = f"summary_{lesson.id}_{transcript_type}"
@@ -625,12 +645,7 @@ def app():
                             
                             st.markdown("---")
                             st.subheader("Summary")
-                            st.text_area(
-                                "Summary Result",
-                                summary_text,
-                                height=300,
-                                key="summary_result_tab4"
-                            )
+                            st.markdown(summary_text)
                             
                             # Download button
                             st.download_button(

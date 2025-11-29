@@ -43,7 +43,8 @@ def summarize_text(
         instruction = type_instructions.get(summary_type, "Create a summary")
         prompt = f"{instruction} of the following text in approximately {max_length} words. Return only the summary without additional commentary."
     
-    full_prompt = f"{prompt}\n\nText:\n{text}"
+    print(f"Prompt: {prompt}")
+    full_prompt = f"{prompt}\n\n{text}"
     
     if provider == "openai":
         client = openai.OpenAI(api_key=api_key)
