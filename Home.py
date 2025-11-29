@@ -7,13 +7,13 @@ from services.course_service import CourseService
 
 # Configure page (must be first Streamlit command)
 st.set_page_config(
-    page_title="Processed Lessons",
-    page_icon="📚",
+    page_title="Knowledge Refinery",
+    page_icon="🔬",
     layout="wide",
     menu_items={
         "Get Help": None,
         "Report a bug": None,
-        "About": None,
+        "About": "Knowledge Refinery - Transform audio lessons into refined knowledge",
     },
 )
 
@@ -52,7 +52,8 @@ def format_duration(seconds: Optional[float]) -> str:
         return f"{hours}h {mins}m {secs}s"
     return f"{minutes}m {secs}s"
 
-st.title("📚 Processed Lessons")
+st.title("🔬 Knowledge Refinery")
+st.caption("Transform audio lessons into refined knowledge")
 
 # Get database session
 session = next(get_session())
